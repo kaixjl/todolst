@@ -1,14 +1,15 @@
-use std::rc::*;
-use std::cell::*;
+// use std::rc::*;
+// use std::cell::*;
+use std::sync::{ Weak, Mutex };
 
 pub struct Group {
     id: u32,
     title: String,
-    parent: Option<Weak<RefCell<Group>>>,
+    parent: Option<Weak<Mutex<Group>>>,
 }
 
 impl Group {
-    pub fn new(id: u32, title: &str, parent: Option<Weak<RefCell<Group>>>) -> Self {
+    pub fn new(id: u32, title: &str, parent: Option<Weak<Mutex<Group>>>) -> Self {
         Self {
             id, title: String::from(title), parent
         }
@@ -19,13 +20,13 @@ impl Group {
     pub fn title(&self) -> &str { self.title.as_ref() }
     pub fn set_title(&mut self, title: String) -> &mut Self { self.title = title; self }
 
-    pub fn parent(&self) -> Option<Weak<RefCell<Group>>> { 
+    pub fn parent(&self) -> Option<Weak<Mutex<Group>>> { 
         match &self.parent {
             Some(x) => Some(x.clone()),
             None => None
         }
     }
-    pub fn set_parent(&mut self, parent: Option<Weak<RefCell<Group>>>) -> &mut Self { self.parent = parent; self }
-    pub fn parent_ref(&self) -> &Option<Weak<RefCell<Group>>> { &self.parent }
-    pub fn parent_mut(&mut self) -> &mut Option<Weak<RefCell<Group>>> { &mut self.parent }
+    pub fn set_parent(&mut self, parent: Option<Weak<Mutex<Group>>>) -> &mut Self { self.parent = parent; self }
+    pub fn parent_ref(&self) -> &Option<Weak<Mutex<Group>>> { &self.parent }
+    pub fn parent_mut(&mut self) -> &mut Option<Weak<Mutex<Group>>> { &mut self.parent }
 }
