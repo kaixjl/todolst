@@ -1,0 +1,32 @@
+[package]
+name = "todolst"
+version = "0.1.0"
+authors = ["Hx <kaixjl@163.com>"]
+edition = "2018"
+readme = "README.md"
+license = "MIT"
+
+[lib]
+# proc-macro = true
+
+[profile.dev]
+opt-level = 1
+
+[features]
+debug = ["orbtk/debug"]
+
+[dependencies]
+# orbtk = { git = "https://github.com/redox-os/orbtk.git", branch= "develop" }
+orbtk = "0.3.1-alpha1"
+sqlx = "0.3.5"
+chrono = "0.4"
+property = "0.3.2"
+prisma = "0.1.1"
+palette = "0.5.0"
+proc-macro2 = "1.0.19"
+quote = "1.0.7"
+syn = "1.0.38"
+
+[dependencies.rusqlite]
+version = "0.23.1"
+features = ["bundled"]
