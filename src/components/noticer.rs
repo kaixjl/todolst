@@ -39,18 +39,14 @@ impl Noticer {
                 let now = Local::now().naive_local();
                 let datetimes = datetimes.lock();
                 match datetimes {
-                    Err(_) => {
-                        todo!();
-                    },
+                    Err(_) => (),
                     Ok(mut datetimes) => {
                         let mut datetimes_to_remove: Vec<NaiveDateTime> = Vec::new();
                         for &datetime in datetimes.iter() {
                             if now > datetime {
                                 let callees = callees.lock();
                                 match callees {
-                                    Err(_) => {
-                                        todo!();
-                                    }
+                                    Err(_) => (),
                                     Ok(callees) => {
                                         for callee in callees.iter() {
                                             callee(datetime);

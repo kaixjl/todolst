@@ -6,6 +6,12 @@ use std::sync::{ Arc, Mutex, Weak };
 use chrono::prelude::*;
 // use std::thread;
 // use std::time;
+use std::path::Path;
+use sqlx::sqlite::*;
+use rusqlite::{ params, Connection };
+use futures::{Future};
+use futures::executor::*;
+
 
 #[derive(Debug)]
 pub struct Error;
@@ -62,12 +68,21 @@ impl TodoLst {
     }
 
     pub fn new_item(&mut self, message: &str, list: Weak<Mutex<list::List>>) -> Weak<Mutex<item::Item>> {
-        let itm = Arc::new(Mutex::new(item::Item::new(
+        let itm = item::Item::new(
             self.next_item_id, message, 0, item::ItemStyle{ marker: item::Marker(0) }, false, 
-            None, None, None, None, list
-        )));
+            None, None, None, None, list.clone()
+        );
 
-        self.items.insert(self.next_item_id, itm);
+        self.add_item(itm)
+    }
+
+    pub fn add_item(&mut self, item: item::Item) -> Weak<Mutex<item::Item>> {
+        let list = item.list().clone();
+        
+        let itm = Arc::new(Mutex::new(item));
+
+        self.items.insert(self.next_item_id, itm.clone());
+        list.upgrade().unwrap().lock().unwrap().add_item(itm.clone());
 
         let itm = self.item(self.next_item_id);
 
@@ -212,14 +227,21 @@ impl TodoLst {
 
     pub fn set_item_list(&self, item: &Weak<Mutex<item::Item>>,  list: Weak<Mutex<list::List>>) -> &Self {
         let item = item.upgrade();
-        if let Some(item) = item {
-            let item = item.lock();
+        if let Some(item_rc) = item {
+            let mut list_old = None;
+            let item = item_rc.lock();
             match item {
                 Err(_) => (),
                 Ok(mut item) => {
+                    list_old = Some(item.list());
                     item.set_list(list);
                 }
             }
+            match list_old {
+                None => (),
+                Some(list_old) => { list_old.upgrade().unwrap().lock().unwrap().remove_item(&item_rc); }
+            }
+            
         }
         self
     }
@@ -417,6 +439,65 @@ impl TodoLst {
             }
         }
     }
+
+    pub async fn load() -> Self {
+        // let conn_opt = SqliteConnectOptions::new().filename("todolst.db").read_only(true);
+        // let pool = SqlitePoolOptions::new().connect_with(conn_opt).await;
+        // match pool {
+        //     Err(_) => (),
+        //     Ok(pool) => {
+                
+        //     }
+        // }
+        
+        let db_path = Path::new("todolst.db");
+        let db_exists = db_path.exists();
+        
+        if db_exists {
+            if let Ok(conn) = Connection::open(db_path) {
+                let mut mgmt = Self::new();
+                let mut stmt = conn.prepare("SELECT title, parent FROM groups").unwrap();
+                let gps: Vec<GroupRow> = stmt.query_map(rusqlite::NO_PARAMS, |row| {
+                    Ok(GroupRow(
+                        row.get(0)?,
+                        row.get(1)?
+                    ))
+                }).unwrap().map(|itm| {itm.unwrap()}).collect();
+                for gp in gps.iter() {
+                    mgmt.new_list(gp.0.as_ref()).unwrap_or_default();
+                }
+                for gp in gps.iter() {
+                    mgmt.set_group_parent(gp.0.as_ref(), if gp.1.len()>0 {Some(mgmt.group(gp.1.as_ref()))} else {None});
+                }
+
+                let mut stmt = conn.prepare("SELECT title, group FROM groups").unwrap();
+                let lsts: Vec<ListRow> = stmt.query_map(rusqlite::NO_PARAMS, |row| {
+                    Ok(ListRow(
+                        row.get(0)?,
+                        row.get(1)?
+                    ))
+                }).unwrap().map(|itm|{itm.unwrap()}).collect();
+                for lst in lsts {
+                    if let Ok(_) = mgmt.new_list(lst.0.as_ref()) {
+                        mgmt.set_list_group(lst.0.as_ref(), if lst.1.len()>0 {Some(mgmt.group(lst.1.as_ref()))} else {None});
+                    }
+                }
+
+                let stmt = conn.prepare("SELECT message, level, marker, color, today, notice, notice, deadline, plan, repeat, list, finished, note FROM items").unwrap();
+                todo!();
+                
+            }
+        }
+        
+        
+        
+
+        todo!();
+    }
+
+    pub fn save(&self) {
+        todo!();
+    }
 }
 
 impl Drop for TodoLst {
@@ -424,6 +505,9 @@ impl Drop for TodoLst {
         self.noticer.stop();
     }
 }
+
+struct GroupRow(String/* title */, String/* parent */);
+struct ListRow(String/* title */, String/* group */);
 
 pub struct ItemIntoIter {
     items: Vec<Weak<Mutex<item::Item>>>,
