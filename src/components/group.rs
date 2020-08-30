@@ -2,6 +2,7 @@
 // use std::cell::*;
 use std::sync::{ Weak, Mutex };
 
+#[derive(Debug)]
 pub struct Group {
     id: u32,
     title: String,

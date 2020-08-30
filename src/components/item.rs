@@ -7,20 +7,19 @@ use std::sync::{ Mutex, Weak };
 
 
 
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub enum RepeatSpan {
     Days(i32),
     Weeks(i32),
     Months(i32),
     Years(i32),
-    PerDay,
-    PerWeeks,
-    PerMonth,
-    PerYear,
-    Custom(chrono::Duration)
+    // PerDay,
+    // PerWeeks,
+    // PerMonth,
+    // PerYear,
 }
 
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub struct Marker(pub i32);
 
 // pub struct Color {
@@ -30,12 +29,13 @@ pub struct Marker(pub i32);
 //     a: u8
 // }
 
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub struct ItemStyle {
     pub marker: Marker,
     // color: Color
 }
 
+#[derive(Debug)]
 pub struct Item {
     id: u32,
     message: String,
@@ -46,7 +46,7 @@ pub struct Item {
     deadline: Option<NaiveDate>,
     plan: Option<NaiveDate>,
     repeat: Option<RepeatSpan>,
-    list: Weak<Mutex<list::List>>,
+    list: Option<Weak<Mutex<list::List>>>,
     finished: bool,
     note: String,
 }
@@ -54,7 +54,7 @@ pub struct Item {
 impl Item {
     pub fn new(id: u32, message: &str, level: i8, style: ItemStyle, today: bool, 
         notice: Option<NaiveDateTime>, deadline: Option<NaiveDate>, 
-        plan: Option<NaiveDate>, repeat: Option<RepeatSpan>, list: Weak<Mutex<list::List>>) -> Self {
+        plan: Option<NaiveDate>, repeat: Option<RepeatSpan>, list: Option<Weak<Mutex<list::List>>>) -> Self {
             Self {
                 id, message: String::from(message), level, style, today, notice, deadline, plan, repeat, list, 
                 finished: false, note: String::new()
@@ -101,10 +101,10 @@ impl Item {
     pub fn repeat_ref(&self) -> &Option<RepeatSpan> { &self.repeat }
     pub fn repeat_mut(&mut self) -> &mut Option<RepeatSpan> { &mut self.repeat }
 
-    pub fn list(&self) -> Weak<Mutex<list::List>> { self.list.clone() }
-    pub fn set_list(&mut self, list: Weak<Mutex<list::List>>) -> &mut Self { self.list = list; self }
-    pub fn list_ref(&self) -> &Weak<Mutex<list::List>> { &self.list }
-    pub fn list_mut(&mut self) -> &mut Weak<Mutex<list::List>> { &mut self.list }
+    pub fn list(&self) -> Option<Weak<Mutex<list::List>>> { self.list.clone() }
+    pub fn set_list(&mut self, list: Option<Weak<Mutex<list::List>>>) -> &mut Self { self.list = list; self }
+    pub fn list_ref(&self) -> &Option<Weak<Mutex<list::List>>> { &self.list }
+    pub fn list_mut(&mut self) -> &mut Option<Weak<Mutex<list::List>>> { &mut self.list }
 
     pub fn finished(&self) -> bool { self.finished }
     pub fn set_finished(&mut self, finished: bool) -> &mut Self { self.finished = finished; self }

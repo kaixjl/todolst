@@ -7,14 +7,31 @@ use chrono::prelude::*;
 // use std::thread;
 // use std::time;
 use std::path::Path;
-use sqlx::sqlite::*;
+// use sqlx::sqlite::*;
 use rusqlite::{ params, Connection };
-use futures::{Future};
-use futures::executor::*;
+// use futures::{Future};
+// use futures::executor::*;
 
 
 #[derive(Debug)]
-pub struct Error;
+pub enum Error {
+    RusqliteError(rusqlite::Error),
+    IoError(std::io::Error),
+    OtherError,
+}
+
+type Result<T> = std::result::Result<T, Error>;
+
+impl From<rusqlite::Error> for Error {
+    fn from(e: rusqlite::Error) -> Self {
+        Error::RusqliteError(e)
+    }
+}
+impl From<std::io::Error> for Error {
+    fn from(e: std::io::Error) -> Self {
+        Error::IoError(e)
+    }
+}
 
 pub struct TodoLst {
     groups: HashMap<String, Arc<Mutex<group::Group>>>,
@@ -70,15 +87,14 @@ impl TodoLst {
     pub fn new_item(&mut self, message: &str, list: Weak<Mutex<list::List>>) -> Weak<Mutex<item::Item>> {
         let itm = item::Item::new(
             self.next_item_id, message, 0, item::ItemStyle{ marker: item::Marker(0) }, false, 
-            None, None, None, None, list.clone()
+            None, None, None, None, Some(list.clone())
         );
 
-        self.add_item(itm)
+        self.add_item(itm, list)
     }
 
-    pub fn add_item(&mut self, item: item::Item) -> Weak<Mutex<item::Item>> {
-        let list = item.list().clone();
-        
+    pub fn add_item(&mut self, item: item::Item, list: Weak<Mutex<list::List>>) -> Weak<Mutex<item::Item>> {
+       
         let itm = Arc::new(Mutex::new(item));
 
         self.items.insert(self.next_item_id, itm.clone());
@@ -233,8 +249,8 @@ impl TodoLst {
             match item {
                 Err(_) => (),
                 Ok(mut item) => {
-                    list_old = Some(item.list());
-                    item.set_list(list);
+                    list_old = item.list();
+                    item.set_list(Some(list));
                 }
             }
             match list_old {
@@ -326,9 +342,9 @@ impl TodoLst {
     /// ## Return
     /// 
     /// Error if title have existed. or the new `Weak<Mutex<list::List>>`
-    pub fn new_list(&mut self, title: &str) -> Result<Weak<Mutex<list::List>>, Error> {
+    pub fn new_list(&mut self, title: &str) -> Result<Weak<Mutex<list::List>>> {
         if self.lists.contains_key(title) {
-            return Err(Error)
+            return Err(Error::OtherError)
         }
 
         let lst = Arc::new(Mutex::new(list::List::new(
@@ -377,9 +393,9 @@ impl TodoLst {
     /// ## Return
     /// 
     /// Error if title have existed. or the new `Weak<Mutex<group::Group>>`
-    pub fn new_group(&mut self, title: &str) -> Result<Weak<Mutex<group::Group>>, Error> {
+    pub fn new_group(&mut self, title: &str) -> Result<Weak<Mutex<group::Group>>> {
         if self.groups.contains_key(title) {
-            return Err(Error)
+            return Err(Error::OtherError)
         }
 
         let grp = Arc::new(Mutex::new(group::Group::new(
@@ -452,10 +468,11 @@ impl TodoLst {
         
         let db_path = Path::new("todolst.db");
         let db_exists = db_path.exists();
+
+        let mut mgmt = Self::new();
         
         if db_exists {
             if let Ok(conn) = Connection::open(db_path) {
-                let mut mgmt = Self::new();
                 let mut stmt = conn.prepare("SELECT title, parent FROM groups").unwrap();
                 let gps: Vec<GroupRow> = stmt.query_map(rusqlite::NO_PARAMS, |row| {
                     Ok(GroupRow(
@@ -467,10 +484,20 @@ impl TodoLst {
                     mgmt.new_list(gp.0.as_ref()).unwrap_or_default();
                 }
                 for gp in gps.iter() {
-                    mgmt.set_group_parent(gp.0.as_ref(), if gp.1.len()>0 {Some(mgmt.group(gp.1.as_ref()))} else {None});
+                    let parent = {
+                        match gp.1 {
+                            None => None,
+                            Some(ref parent) => {
+                                if parent.len()>0 {
+                                    Some(mgmt.group(parent.as_ref()))
+                                } else { None }
+                            }
+                        }
+                    };
+                    mgmt.set_group_parent(gp.0.as_ref(), parent);
                 }
 
-                let mut stmt = conn.prepare("SELECT title, group FROM groups").unwrap();
+                let mut stmt = conn.prepare("SELECT title, [group] FROM lists").unwrap();
                 let lsts: Vec<ListRow> = stmt.query_map(rusqlite::NO_PARAMS, |row| {
                     Ok(ListRow(
                         row.get(0)?,
@@ -479,24 +506,221 @@ impl TodoLst {
                 }).unwrap().map(|itm|{itm.unwrap()}).collect();
                 for lst in lsts {
                     if let Ok(_) = mgmt.new_list(lst.0.as_ref()) {
-                        mgmt.set_list_group(lst.0.as_ref(), if lst.1.len()>0 {Some(mgmt.group(lst.1.as_ref()))} else {None});
+                        let group = {
+                            match lst.1 {
+                                None => None,
+                                Some(ref group) => {
+                                    if group.len()>0 {
+                                        Some(mgmt.group(group.as_ref()))
+                                    } else { None }
+                                }
+                            }
+                        };
+                        mgmt.set_list_group(lst.0.as_ref(), group);
                     }
                 }
 
-                let stmt = conn.prepare("SELECT message, level, marker, color, today, notice, notice, deadline, plan, repeat, list, finished, note FROM items").unwrap();
-                todo!();
-                
+                let mut stmt = conn.prepare("SELECT message, level, marker, color, today, notice, deadline, [plan], repeat, repeatunit, list, finished, note FROM items").unwrap();
+                let itms: Vec<ItemRow> = stmt.query_map(rusqlite::NO_PARAMS, |row| {
+                    Ok(ItemRow {
+                        message: row.get(0)?,
+                        level: row.get(1)?,
+                        style: item::ItemStyle { marker: item::Marker(row.get(2)?)},
+                        today: match row.get::<usize, Option<NaiveDate>>(4)? { None=>false, Some(date)=>Local::now().naive_local().date() == date },
+                        notice: row.get(5)?,
+                        deadline: row.get(6)?,
+                        plan: row.get(7)?,
+                        repeat: {
+                            let repeatspan = row.get::<usize, i32>(8)?;
+                            let repeatunit = row.get::<usize, i8>(9)?;
+
+                            if repeatspan==0 { None }
+                            else {
+                                match repeatunit {
+                                    0=> { Some(item::RepeatSpan::Days(repeatspan)) },
+                                    1=> { Some(item::RepeatSpan::Weeks(repeatspan)) },
+                                    2=> { Some(item::RepeatSpan::Months(repeatspan)) },
+                                    3=> { Some(item::RepeatSpan::Years(repeatspan)) },
+                                    _=> { None }
+                                }
+                            }
+                        },
+                        list: row.get(10)?,
+                        finished: row.get(11)?,
+                        note: row.get(12)?,
+                    })
+                }).unwrap().map(|itm| {itm.unwrap()}).collect();
+                for itm in itms {
+                    let list = mgmt.list(itm.list.as_ref());
+                    let item = mgmt.new_item(itm.message.as_ref(), list);
+                    mgmt.set_item_level(&item, itm.level);
+                    mgmt.set_item_style(&item, itm.style);
+                    mgmt.set_item_today(&item, itm.today);
+                    mgmt.set_item_notice(&item, itm.notice);
+                    mgmt.set_item_deadline(&item, itm.deadline);
+                    mgmt.set_item_plan(&item, itm.plan);
+                    mgmt.set_item_repeat(&item, itm.repeat);
+                    mgmt.set_item_finished(&item, itm.finished);
+                    mgmt.set_item_note(&item, itm.note.as_ref());
+                }
             }
         }
         
-        
-        
-
-        todo!();
+       mgmt
     }
 
-    pub fn save(&self) {
-        todo!();
+    pub async fn save(&self) -> Result<()> {
+        let db_path = Path::new("todolst.db");
+        let db_exists = db_path.exists();
+        let db_bk_path = Path::new("todolst.db.bak");
+        // let db_bk_exists = db_bk_path.exists();
+        // if db_bk_exists { std::fs::remove_file(db_bk_path)?; }
+        if db_exists { std::fs::rename(db_path, db_bk_path).unwrap_or_default(); }
+
+        if let Ok(mut conn) = Connection::open(db_path) {
+            conn.execute(
+                r#"
+                CREATE TABLE groups (
+                    id     INTEGER UNIQUE
+                                   NOT NULL,
+                    title  STRING  PRIMARY KEY,
+                    parent STRING  REFERENCES groups (title) 
+                );
+                "#, 
+                rusqlite::NO_PARAMS)?;
+
+            conn.execute(
+                r#"
+                CREATE TABLE lists (
+                    id      INTEGER UNIQUE
+                                    NOT NULL,
+                    title   STRING  PRIMARY KEY,
+                    [group] STRING  REFERENCES groups (title) 
+                );
+                "#, 
+                rusqlite::NO_PARAMS)?;
+
+            conn.execute(
+                r#"
+                CREATE TABLE items (
+                    id         INTEGER  PRIMARY KEY,
+                    message    STRING   NOT NULL,
+                    level      INTEGER  NOT NULL
+                                        DEFAULT (0),
+                    marker     INTEGER  NOT NULL
+                                        DEFAULT (0),
+                    color      INTEGER  NOT NULL
+                                        DEFAULT (0),
+                    today      DATETIME,
+                    notice     DATETIME,
+                    deadline   DATETIME,
+                    [plan]     DATETIME,
+                    repeat     INTEGER  DEFAULT (0) 
+                                        NOT NULL,
+                    repeatunit INTEGER  DEFAULT (0) 
+                                        NOT NULL,
+                    list       STRING   REFERENCES lists (title),
+                    finished   BOOLEAN  NOT NULL
+                                        DEFAULT (false),
+                    note       STRING
+                );
+                "#, 
+                rusqlite::NO_PARAMS)?;
+
+            let transaction = conn.transaction()?;
+            { // Insert groups
+                let mut stmt = transaction.prepare(
+                    "INSERT INTO groups(id, title, parent) VALUES (?1, ?2, ?3)"
+                )?;
+                for group in self.iter_groups() {
+                    if let Some(group) = group.upgrade() {
+                        let group = group.lock().unwrap();
+                        let id = group.id();
+                        let title = group.title();
+                        let parent = if group.parent().is_some() { 
+                            let parent = group.parent().unwrap();
+                            let parent = parent.upgrade().unwrap();
+                            let parent = parent.lock().unwrap();
+                            Some(parent.title().to_string())
+                        } else { None };
+                        stmt.execute(params![id, title, parent])?;
+                    }
+                }
+            } // Insert groups
+            { // Insert lists
+                let mut stmt = transaction.prepare(
+                    "INSERT INTO lists(id, title, [group]) VALUES (?1, ?2, ?3)"
+                )?;
+                for list in self.iter_lists() {
+                    if let Some(list) = list.upgrade() {
+                        let list = list.lock().unwrap();
+                        let id = list.id();
+                        let title = list.title();
+                        let group = if list.group().is_some() {
+                            let group = list.group().unwrap();
+                            let group = group.upgrade().unwrap();
+                            let group = group.lock().unwrap();
+                            Some(group.title().to_string())
+                        } else { None };
+                        stmt.execute(params![id, title, group])?;
+                    }
+                }
+            } // Insert lists
+            { // Insert items
+                let mut stmt = transaction.prepare(
+                    "INSERT INTO items(id, message, level, marker, color, today, notice, deadline, [plan], repeat, repeatunit, list, finished, note) 
+                    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)"
+                )?;
+                for item in self.iter_items() {
+                    if let Some(item) = item.upgrade() {
+                        let item = item.lock().unwrap();
+                        let id = item.id();
+                        let message = item.message();
+                        let level = item.level();
+                        let marker = item.style().marker.0;
+                        let color = 0i32;
+                        let today = if item.today() { Some(Local::now().naive_local().date()) } else { None };
+                        let notice = item.notice();
+                        let deadline = item.deadline();
+                        let plan = item.plan();
+                        let repeat = match item.repeat() {
+                            None => 0,
+                            Some(r) => {
+                                match r {
+                                    item::RepeatSpan::Days(r) => r,
+                                    item::RepeatSpan::Weeks(r) => r,
+                                    item::RepeatSpan::Months(r) => r,
+                                    item::RepeatSpan::Years(r) => r,
+                                }
+                            },
+                        };
+                        let repeatunit = match item.repeat() {
+                            None => 0,
+                            Some(r) => {
+                                match r {
+                                    item::RepeatSpan::Days(_) => 0,
+                                    item::RepeatSpan::Weeks(_) => 1,
+                                    item::RepeatSpan::Months(_) => 2,
+                                    item::RepeatSpan::Years(_) => 3,
+                                }
+                            },
+                        };
+                        let list = if item.list().is_some() {
+                            let list = item.list().unwrap();
+                            let list = list.upgrade().unwrap();
+                            let list = list.lock().unwrap();
+                            Some(list.title().to_string())
+                        } else { None };
+                        let finished = item.finished();
+                        let note = item.note();
+                        stmt.execute(params![id, message, level, marker, color, today, notice, deadline, plan, repeat, repeatunit, list, finished, note])?;
+                    }
+                }
+            } // Insert items
+            transaction.commit().unwrap_or_default();
+            return Ok(())
+        }
+        Err(Error::OtherError)
     }
 }
 
@@ -506,8 +730,21 @@ impl Drop for TodoLst {
     }
 }
 
-struct GroupRow(String/* title */, String/* parent */);
-struct ListRow(String/* title */, String/* group */);
+struct GroupRow(String/* title */, Option<String>/* parent */);
+struct ListRow(String/* title */, Option<String>/* group */);
+struct ItemRow {
+    message: String,
+    level: i8,
+    style: item::ItemStyle,
+    today: bool,
+    notice: Option<NaiveDateTime>,
+    deadline: Option<NaiveDate>,
+    plan: Option<NaiveDate>,
+    repeat: Option<item::RepeatSpan>,
+    list: String,
+    finished: bool,
+    note: String,
+}
 
 pub struct ItemIntoIter {
     items: Vec<Weak<Mutex<item::Item>>>,
@@ -531,6 +768,7 @@ impl Iterator for ItemIntoIter {
     type Item = Weak<Mutex<item::Item>>;
 
     fn next(&mut self) -> Option<Self::Item> {
+        if self.idx >= self.items.len() { return None; }
         let itm = self.items[self.idx].clone();
         self.idx += 1;
         Some(itm)
@@ -559,6 +797,7 @@ impl Iterator for ListIntoIter {
     type Item = Weak<Mutex<list::List>>;
 
     fn next(&mut self) -> Option<Self::Item> {
+        if self.idx >= self.items.len() { return None; }
         let itm = self.items[self.idx].clone();
         self.idx += 1;
         Some(itm)
@@ -587,6 +826,7 @@ impl Iterator for GroupIntoIter {
     type Item = Weak<Mutex<group::Group>>;
 
     fn next(&mut self) -> Option<Self::Item> {
+        if self.idx >= self.items.len() { return None; }
         let itm = self.items[self.idx].clone();
         self.idx += 1;
         Some(itm)

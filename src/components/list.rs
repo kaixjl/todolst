@@ -3,6 +3,7 @@ use crate::components::item;
 // use std::rc::*;
 use std::sync::{ Weak, Mutex, Arc };
 
+#[derive(Debug)]
 pub struct List {
     id: u32,
     title: String,
