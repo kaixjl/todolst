@@ -172,7 +172,9 @@ impl TodoLst {
                     if let Some(notice_datetime) = notice {
                         item.set_notice(notice);
                         self.add_to_notice(item_arc.clone(), notice_datetime);
-                        self.noticer.add_notice(notice_datetime);
+                        if Local::now().naive_local() < notice_datetime {
+                            self.noticer.add_notice(notice_datetime);
+                        }
                     }
                 }
                 Some(notice_already) => {
@@ -188,7 +190,9 @@ impl TodoLst {
                                 self.remove_from_notice(&item_arc, &notice_already);
                                 self.noticer.remove_notice(&notice_already);
                                 self.add_to_notice(item_arc.clone(), notice_datetime);
-                                self.noticer.add_notice(notice_datetime);
+                                if Local::now().naive_local() < notice_datetime {
+                                    self.noticer.add_notice(notice_datetime);
+                                }
                             }
                         }
                     }
@@ -481,7 +485,7 @@ impl TodoLst {
                     ))
                 }).unwrap().map(|itm| {itm.unwrap()}).collect();
                 for gp in gps.iter() {
-                    mgmt.new_list(gp.0.as_ref()).unwrap_or_default();
+                    mgmt.new_group(gp.0.as_ref()).unwrap_or_default();
                 }
                 for gp in gps.iter() {
                     let parent = {
