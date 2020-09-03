@@ -19,6 +19,17 @@ pub enum RepeatSpan {
     // PerYear,
 }
 
+impl ToString for RepeatSpan {
+    fn to_string(&self) -> String {
+        match self {
+            RepeatSpan::Days(t) => format!("{}d", t),
+            RepeatSpan::Weeks(t) => format!("{}w", t),
+            RepeatSpan::Months(t) => format!("{}m", t),
+            RepeatSpan::Years(t) => format!("{}y", t),
+        }
+    }
+}
+
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub struct Marker(pub i32);
 
@@ -33,6 +44,12 @@ pub struct Marker(pub i32);
 pub struct ItemStyle {
     pub marker: Marker,
     // color: Color
+}
+
+impl ToString for ItemStyle {
+    fn to_string(&self) -> String {
+        format!("Marker({})", self.marker.0)
+    }
 }
 
 #[derive(Debug)]
