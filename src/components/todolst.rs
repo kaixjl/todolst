@@ -17,6 +17,11 @@ use rusqlite::{ params, Connection };
 pub enum Error {
     RusqliteError(rusqlite::Error),
     IoError(std::io::Error),
+    NonexistingList,
+    NonexistingGroup,
+    NonexistingItem,
+    ExistingTitle,
+    OtherErrorWithStr(String),
     OtherError,
 }
 
@@ -79,9 +84,9 @@ impl TodoLst {
         val
     }
 
-    pub fn item(&self, id: u32) -> Weak<Mutex<item::Item>> {
-        // Arc::downgrade(&self.items[&id])
-        Arc::downgrade(&self.items[&id])
+    pub fn item(&self, id: u32) -> Result<Weak<Mutex<item::Item>>> {
+        if !self.items.contains_key(&id) { return Err(Error::NonexistingItem); }
+        Ok(Arc::downgrade(&self.items[&id]))
     }
 
     pub fn new_item(&mut self, message: &str, list: Weak<Mutex<list::List>>) -> Weak<Mutex<item::Item>> {
@@ -104,7 +109,7 @@ impl TodoLst {
 
         self.next_item_id += 1;
 
-        itm
+        itm.unwrap()
     }
 
     pub fn set_item_message(&self, item: Weak<Mutex<item::Item>>, message: &str) -> &Self {
@@ -339,8 +344,9 @@ impl TodoLst {
         }
     }
 
-    pub fn list(&self, title: &str) -> Weak<Mutex<list::List>> {
-        Arc::downgrade(&self.lists[title])
+    pub fn list(&self, title: &str) -> Result<Weak<Mutex<list::List>>> {
+        if !self.lists.contains_key(title) { return Err(Error::NonexistingList); }
+        Ok(Arc::downgrade(&self.lists[title]))
     }
 
     /// ## Return
@@ -348,7 +354,7 @@ impl TodoLst {
     /// Error if title have existed. or the new `Weak<Mutex<list::List>>`
     pub fn new_list(&mut self, title: &str) -> Result<Weak<Mutex<list::List>>> {
         if self.lists.contains_key(title) {
-            return Err(Error::OtherError)
+            return Err(Error::ExistingTitle)
         }
 
         let lst = Arc::new(Mutex::new(list::List::new(
@@ -361,10 +367,12 @@ impl TodoLst {
 
         self.next_list_id += 1;
 
-        Ok(lst)
+        Ok(lst.unwrap())
     }
 
-    pub fn set_list_title(&self, ori_title: &str,  title: &str) -> &Self {
+    pub fn set_list_title(&self, ori_title: &str,  title: &str) -> Result<&Self> {
+        if !self.lists.contains_key(ori_title) { return Err(Error::NonexistingList); }
+        if self.lists.contains_key(title) { return Err(Error::ExistingTitle); }
         let list = self.lists[ori_title].lock();
         match list {
             Err(_) => (),
@@ -372,10 +380,11 @@ impl TodoLst {
                 list.set_title(title.to_string());
             }
         }
-        self
+        Ok(self)
     }
 
-    pub fn set_list_group(&self, title: &str, group: Option<Weak<Mutex<group::Group>>>) -> &Self {
+    pub fn set_list_group(&self, title: &str, group: Option<Weak<Mutex<group::Group>>>) -> Result<&Self> {
+        if !self.lists.contains_key(title) { return Err(Error::NonexistingGroup); }
         let list = self.lists[title].lock();
         match list {
             Err(_) => (),
@@ -383,15 +392,16 @@ impl TodoLst {
                 list.set_group(group);
             }
         }
-        self
+        Ok(self)
     }
 
     pub fn iter_lists(&self) -> ListIntoIter {
         ListIntoIter::new(&self.lists)
     }
 
-    pub fn group(&self, title: &str) -> Weak<Mutex<group::Group>> {
-        Arc::downgrade(&self.groups[title])
+    pub fn group(&self, title: &str) -> Result<Weak<Mutex<group::Group>>> {
+        if !self.groups.contains_key(title) { return Err(Error::NonexistingGroup); }
+        Ok(Arc::downgrade(&self.groups[title]))
     }
 
     /// ## Return
@@ -399,7 +409,7 @@ impl TodoLst {
     /// Error if title have existed. or the new `Weak<Mutex<group::Group>>`
     pub fn new_group(&mut self, title: &str) -> Result<Weak<Mutex<group::Group>>> {
         if self.groups.contains_key(title) {
-            return Err(Error::OtherError)
+            return Err(Error::ExistingTitle)
         }
 
         let grp = Arc::new(Mutex::new(group::Group::new(
@@ -412,10 +422,12 @@ impl TodoLst {
 
         self.next_group_id += 1;
 
-        Ok(grp)
+        Ok(grp.unwrap())
     }
 
-    pub fn set_group_title(&self, ori_title: &str,  title: &str) -> &Self {
+    pub fn set_group_title(&self, ori_title: &str,  title: &str) -> Result<&Self> {
+        if !self.groups.contains_key(ori_title) { return Err(Error::NonexistingGroup); }
+        if self.groups.contains_key(title) { return Err(Error::ExistingTitle); }
         let group = self.groups[ori_title].lock();
         match group {
             Err(_) => (),
@@ -423,10 +435,11 @@ impl TodoLst {
                 group.set_title(title.to_string());
             }
         }
-        self
+        Ok(self)
     }
 
-    pub fn set_group_parent(&self, title: &str, parent: Option<Weak<Mutex<group::Group>>>) -> &Self {
+    pub fn set_group_parent(&self, title: &str, parent: Option<Weak<Mutex<group::Group>>>) -> Result<&Self> {
+        if !self.groups.contains_key(title) { return Err(Error::NonexistingGroup); }
         let group = self.groups[title].lock();
         match group {
             Err(_) => (),
@@ -434,7 +447,7 @@ impl TodoLst {
                 group.set_parent(parent);
             }
         }
-        self
+        Ok(self)
     }
 
     pub fn iter_groups(&self) -> GroupIntoIter {
@@ -493,12 +506,12 @@ impl TodoLst {
                             None => None,
                             Some(ref parent) => {
                                 if parent.len()>0 {
-                                    Some(mgmt.group(parent.as_ref()))
+                                    Some(mgmt.group(parent.as_ref()).unwrap())
                                 } else { None }
                             }
                         }
                     };
-                    mgmt.set_group_parent(gp.0.as_ref(), parent);
+                    mgmt.set_group_parent(gp.0.as_ref(), parent).unwrap();
                 }
 
                 let mut stmt = conn.prepare("SELECT title, [group] FROM lists").unwrap();
@@ -515,12 +528,12 @@ impl TodoLst {
                                 None => None,
                                 Some(ref group) => {
                                     if group.len()>0 {
-                                        Some(mgmt.group(group.as_ref()))
+                                        Some(mgmt.group(group.as_ref()).unwrap())
                                     } else { None }
                                 }
                             }
                         };
-                        mgmt.set_list_group(lst.0.as_ref(), group);
+                        mgmt.set_list_group(lst.0.as_ref(), group).unwrap();
                     }
                 }
 
@@ -555,7 +568,7 @@ impl TodoLst {
                     })
                 }).unwrap().map(|itm| {itm.unwrap()}).collect();
                 for itm in itms {
-                    let list = mgmt.list(itm.list.as_ref());
+                    let list = mgmt.list(itm.list.as_ref()).unwrap();
                     let item = mgmt.new_item(itm.message.as_ref(), list);
                     mgmt.set_item_level(&item, itm.level);
                     mgmt.set_item_style(&item, itm.style);
@@ -577,18 +590,19 @@ impl TodoLst {
         let db_path = Path::new("todolst.db");
         let db_exists = db_path.exists();
         let db_bk_path = Path::new("todolst.db.bak");
+        let db_tmp_path = Path::new("todolst.db.tmp");
         // let db_bk_exists = db_bk_path.exists();
         // if db_bk_exists { std::fs::remove_file(db_bk_path)?; }
-        if db_exists { std::fs::rename(db_path, db_bk_path).unwrap_or_default(); }
+        if db_tmp_path.exists() { std::fs::remove_file(db_tmp_path)?; }
 
-        if let Ok(mut conn) = Connection::open(db_path) {
+        if let Ok(mut conn) = Connection::open(db_tmp_path) {
             conn.execute(
                 r#"
                 CREATE TABLE groups (
                     id     INTEGER UNIQUE
                                    NOT NULL,
                     title  STRING  PRIMARY KEY,
-                    parent STRING  REFERENCES groups (title) 
+                    parent STRING 
                 );
                 "#, 
                 rusqlite::NO_PARAMS)?;
@@ -722,6 +736,10 @@ impl TodoLst {
                 }
             } // Insert items
             transaction.commit().unwrap_or_default();
+            drop(conn);
+            
+            if db_exists { std::fs::rename(db_path, db_bk_path).unwrap(); }
+            std::fs::rename(db_tmp_path, db_path).unwrap();
             return Ok(())
         }
         Err(Error::OtherError)
