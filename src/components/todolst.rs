@@ -112,7 +112,17 @@ impl TodoLst {
         itm.unwrap()
     }
 
-    pub fn set_item_message(&self, item: Weak<Mutex<item::Item>>, message: &str) -> &Self {
+    pub fn remove_item(&mut self, item: Weak<Mutex<item::Item>>) {
+        self.set_item_notice(&item, None);
+        
+        let item = item.upgrade().unwrap();
+        let item = item.lock().unwrap();
+        let id = item.id();
+        self.items.remove(&id);
+        
+    }
+
+    pub fn set_item_message(&self, item: &Weak<Mutex<item::Item>>, message: &str) -> &Self {
         let item = item.upgrade();
         if let Some(item) = item {
             let item = item.lock();
@@ -176,6 +186,7 @@ impl TodoLst {
                 None => {
                     if let Some(notice_datetime) = notice {
                         item.set_notice(notice);
+                        drop(item);
                         self.add_to_notice(item_arc.clone(), notice_datetime);
                         if Local::now().naive_local() < notice_datetime {
                             self.noticer.add_notice(notice_datetime);
@@ -186,12 +197,14 @@ impl TodoLst {
                     match notice {
                         None => {
                             item.set_notice(notice);
+                            drop(item);
                             self.remove_from_notice(&item_arc, &notice_already);
                             self.noticer.remove_notice(&notice_already);
                         }
                         Some(notice_datetime) => {
                             if notice_already != notice_datetime {
                                 item.set_notice(notice);
+                                drop(item);
                                 self.remove_from_notice(&item_arc, &notice_already);
                                 self.noticer.remove_notice(&notice_already);
                                 self.add_to_notice(item_arc.clone(), notice_datetime);
@@ -325,9 +338,9 @@ impl TodoLst {
             let mut i_to_remove: usize = 0;
             let mut found = false;
             for (i, val) in v.iter().enumerate() {
-                let val = val.lock().unwrap();
-                let item = item.lock().unwrap();
-                if *val == *item {
+                let val = val.lock().unwrap().id();
+                let item = item.lock().unwrap().id();
+                if val == item {
                     i_to_remove = i;
                     found = true;
                     break;
@@ -368,6 +381,28 @@ impl TodoLst {
         self.next_list_id += 1;
 
         Ok(lst.unwrap())
+    }
+
+    pub fn remove_list(&mut self, title: &str) {
+        let items_to_remove = self.items.values().filter(|i| {
+            let i = i.lock().unwrap();
+            let list = i.list();
+            match list {
+                None => false,
+                Some(list) => {
+                    let list = list.upgrade().unwrap();
+                    let list = list.lock().unwrap();
+                    list.title()==title
+                }
+            }
+        }).map(|i| {
+            Arc::downgrade(i)
+        }).collect::<Vec<Weak<Mutex<item::Item>>>>();
+        for i in items_to_remove {
+            self.remove_item(i);
+        }
+
+        self.lists.remove(title);
     }
 
     pub fn set_list_title(&self, ori_title: &str,  title: &str) -> Result<&Self> {
@@ -423,6 +458,53 @@ impl TodoLst {
         self.next_group_id += 1;
 
         Ok(grp.unwrap())
+    }
+
+    pub fn remove_group(&mut self, title: &str) {
+        let mut group_to_remove = vec![title.to_string()];
+        let mut group_to_remove_really = Vec::new();
+        let mut list_to_remove_really = Vec::new();
+        while let Some(title_s) = group_to_remove.pop() {
+            let title = &title_s[..];
+            let mut lists_to_remove = self.lists.iter().filter_map(|(k, i)| {
+                let i = i.lock().unwrap();
+                let group = i.group();
+                match group {
+                    None => None,
+                    Some(group) => {
+                        let group = group.upgrade().unwrap();
+                        let group = group.lock().unwrap();
+                        if group.title()==title {
+                            Some(k.clone())
+                        } else { None }
+                    }
+                }
+            }).collect::<Vec<String>>();
+            list_to_remove_really.append(&mut lists_to_remove);
+
+            let mut groups_to_add_to_remove = self.groups.iter().filter_map(|(k, i)| {
+                let i = i.lock().unwrap();
+                let parent = i.parent();
+                match parent {
+                    None => None,
+                    Some(parent) => {
+                        let parent = parent.upgrade().unwrap();
+                        let parent = parent.lock().unwrap();
+                        if parent.title()==title {
+                            Some(k.clone())
+                        } else { None }
+                    }
+                }
+            }).collect::<Vec<String>>();
+            group_to_remove.append(&mut groups_to_add_to_remove);
+            group_to_remove_really.push(title_s);
+        }
+        for i in list_to_remove_really {
+            self.remove_list(i.as_ref());
+        }
+        for title in group_to_remove_really {
+            self.groups.remove(&title);
+        }
     }
 
     pub fn set_group_title(&self, ori_title: &str,  title: &str) -> Result<&Self> {
