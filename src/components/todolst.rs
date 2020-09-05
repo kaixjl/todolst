@@ -21,6 +21,7 @@ pub enum Error {
     NonexistingGroup,
     NonexistingItem,
     NonexistingGroupListOrItem,
+    NonexistingParent,
     ExistingTitle,
     OtherErrorWithStr(String),
     OtherError,
@@ -458,8 +459,22 @@ impl TodoLst {
     }
 
     pub fn set_group_parent(&self, group: &Weak<Mutex<group::Group>>, parent: Option<Weak<Mutex<group::Group>>>) -> Result<&Self> {
-        let group = group.upgrade().ok_or(Error::NonexistingGroup)?;
-        let mut group = group.lock().unwrap();
+        let group_rc = group.upgrade().ok_or(Error::NonexistingGroup)?;
+        let group = group_rc.lock().unwrap();
+        let title = group.title().to_string();
+        drop(group);
+
+        let mut parent_of_parent = parent.clone();
+        while let Some(p) = &parent_of_parent {
+            let p = p.upgrade().unwrap();
+            let p = p.lock().unwrap();
+            if p.title()==title { 
+                panic!("Cycle occurred. Please specify another parent."); 
+            }
+            parent_of_parent = p.parent();
+        }
+
+        let mut group = group_rc.lock().unwrap();
         group.set_parent(parent);
         Ok(self)
     }
