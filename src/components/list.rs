@@ -20,7 +20,7 @@ impl List {
 
     pub fn id(&self) -> u32 { self.id }
 
-    pub fn title(&self) -> &str { self.title.as_ref() }
+    pub fn title(&self) -> &str { self.title.as_str() }
     pub fn set_title(&mut self, title: String) -> &mut Self { self.title = title; self }
 
     pub fn group(&self) -> Option<Weak<Mutex<group::Group>>> { 

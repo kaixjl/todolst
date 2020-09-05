@@ -80,7 +80,7 @@ impl Item {
 
     pub fn id(&self) -> u32 { self.id }
     
-    pub fn message(&self) -> &str { self.message.as_ref() }
+    pub fn message(&self) -> &str { self.message.as_str() }
     pub fn set_message(&mut self, message: String) -> &mut Self { self.message = message; self }
     
     pub fn level(&self) -> i8 { self.level }
@@ -128,7 +128,7 @@ impl Item {
     pub fn finished_ref(&self) -> &bool { &self.finished }
     pub fn finished_mut(&mut self) -> &mut bool { &mut self.finished }
 
-    pub fn note(&self) -> &str { self.note.as_ref() }
+    pub fn note(&self) -> &str { self.note.as_str() }
     pub fn set_note(&mut self, note: String) -> &mut Self { self.note = note; self }
 }
 

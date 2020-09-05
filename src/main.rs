@@ -31,8 +31,8 @@ fn main() {
         // let now_std = time::Instant::now();
         let list1 = system.new_list("list1").unwrap();
         let item1 = system.new_item("item1", list1);
-        system.set_item_notice(&item1, Some(now.naive_local() + chrono::Duration::seconds(5)))
-            .set_item_note(&item1, "Hello!");
+        system.set_item_notice(&item1, Some(now.naive_local() + chrono::Duration::seconds(5))).unwrap()
+            .set_item_note(&item1, "Hello!").unwrap();
         block_on(system.save()).unwrap();
         // let end_std = now_std + time::Duration::from_secs(10);
         // while time::Instant::now() < end_std {

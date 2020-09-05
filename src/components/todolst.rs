@@ -20,6 +20,7 @@ pub enum Error {
     NonexistingList,
     NonexistingGroup,
     NonexistingItem,
+    NonexistingGroupListOrItem,
     ExistingTitle,
     OtherErrorWithStr(String),
     OtherError,
@@ -113,7 +114,7 @@ impl TodoLst {
     }
 
     pub fn remove_item(&mut self, item: Weak<Mutex<item::Item>>) {
-        self.set_item_notice(&item, None);
+        self.set_item_notice(&item, None).unwrap();
         
         let item = item.upgrade().unwrap();
         let item = item.lock().unwrap();
@@ -122,95 +123,67 @@ impl TodoLst {
         
     }
 
-    pub fn set_item_message(&self, item: &Weak<Mutex<item::Item>>, message: &str) -> &Self {
-        let item = item.upgrade();
-        if let Some(item) = item {
-            let item = item.lock();
-            match item {
-                Err(_) => (),
-                Ok(mut item) => {
-                    item.set_message(message.to_string());
-                }
-            }
-        }
-        self
+    pub fn set_item_message(&self, item: &Weak<Mutex<item::Item>>, message: &str) -> Result<&Self> {
+        let item = item.upgrade().ok_or(Error::NonexistingItem)?;
+        let mut item = item.lock().unwrap();
+        item.set_message(message.to_string());
+        
+        Ok(self)
     }
 
-    pub fn set_item_level(&self, item: &Weak<Mutex<item::Item>>,  level: i8) -> &Self {
-        let item = item.upgrade();
-        if let Some(item) = item {
-            let item = item.lock();
-            match item {
-                Err(_) => (),
-                Ok(mut item) => {
-                    item.set_level(level);
-                }
-            }
-        }
-        self
+    pub fn set_item_level(&self, item: &Weak<Mutex<item::Item>>,  level: i8) -> Result<&Self> {
+        let item = item.upgrade().ok_or(Error::NonexistingItem)?;
+        let mut item = item.lock().unwrap();
+        item.set_level(level);
+        Ok(self)
     }
 
-    pub fn set_item_style(&self, item: &Weak<Mutex<item::Item>>,  style: item::ItemStyle) -> &Self {
-        let item = item.upgrade();
-        if let Some(item) = item {
-            let item = item.lock();
-            match item {
-                Err(_) => (),
-                Ok(mut item) => {
-                    item.set_style(style);
-                }
-            }
-        }
-        self
+    pub fn set_item_style(&self, item: &Weak<Mutex<item::Item>>,  style: item::ItemStyle) -> Result<&Self> {
+        let item = item.upgrade().ok_or(Error::NonexistingItem)?;
+        let mut item = item.lock().unwrap();
+        item.set_style(style);
+        Ok(self)
     }
 
-    pub fn set_item_today(&self, item: &Weak<Mutex<item::Item>>,  today: bool) -> &Self {
-        let item = item.upgrade();
-        if let Some(item) = item {
-            let item = item.lock();
-            match item {
-                Err(_) => (),
-                Ok(mut item) => {
-                    item.set_today(today);
-                }
-            }
-        }
-        self
+    pub fn set_item_today(&self, item: &Weak<Mutex<item::Item>>,  today: bool) -> Result<&Self> {
+        let item = item.upgrade().ok_or(Error::NonexistingItem)?;
+        let mut item = item.lock().unwrap();
+        item.set_today(today);
+        Ok(self)
     }
 
-    pub fn set_item_notice(&mut self, item: &Weak<Mutex<item::Item>>,  notice: Option<NaiveDateTime>) -> &Self {
-        let item = item.upgrade();
-        if let Some(item_arc) = item {
-            let mut item = item_arc.lock().unwrap();
-            match item.notice() {
-                None => {
-                    if let Some(notice_datetime) = notice {
-                        item.set_notice(notice);
-                        drop(item);
-                        self.add_to_notice(item_arc.clone(), notice_datetime);
-                        if Local::now().naive_local() < notice_datetime {
-                            self.noticer.add_notice(notice_datetime);
-                        }
+    pub fn set_item_notice(&mut self, item: &Weak<Mutex<item::Item>>,  notice: Option<NaiveDateTime>) -> Result<&Self> {
+        let item_arc = item.upgrade().ok_or(Error::NonexistingList)?;
+        
+        let mut item = item_arc.lock().unwrap();
+        match item.notice() {
+            None => {
+                if let Some(notice_datetime) = notice {
+                    item.set_notice(notice);
+                    drop(item);
+                    self.add_to_notice(item_arc.clone(), notice_datetime);
+                    if Local::now().naive_local() < notice_datetime {
+                        self.noticer.add_notice(notice_datetime);
                     }
                 }
-                Some(notice_already) => {
-                    match notice {
-                        None => {
+            }
+            Some(notice_already) => {
+                match notice {
+                    None => {
+                        item.set_notice(notice);
+                        drop(item);
+                        self.remove_from_notice(&item_arc, &notice_already);
+                        self.noticer.remove_notice(&notice_already);
+                    }
+                    Some(notice_datetime) => {
+                        if notice_already != notice_datetime {
                             item.set_notice(notice);
                             drop(item);
                             self.remove_from_notice(&item_arc, &notice_already);
                             self.noticer.remove_notice(&notice_already);
-                        }
-                        Some(notice_datetime) => {
-                            if notice_already != notice_datetime {
-                                item.set_notice(notice);
-                                drop(item);
-                                self.remove_from_notice(&item_arc, &notice_already);
-                                self.noticer.remove_notice(&notice_already);
-                                self.add_to_notice(item_arc.clone(), notice_datetime);
-                                if Local::now().naive_local() < notice_datetime {
-                                    self.noticer.add_notice(notice_datetime);
-                                }
+                            self.add_to_notice(item_arc.clone(), notice_datetime);
+                            if Local::now().naive_local() < notice_datetime {
+                                self.noticer.add_notice(notice_datetime);
                             }
                         }
                     }
@@ -218,98 +191,64 @@ impl TodoLst {
             }
         }
         
-        self
+        
+        Ok(self)
     }
 
-    pub fn set_item_deadline(&self, item: &Weak<Mutex<item::Item>>,  deadline: Option<NaiveDate>) -> &Self {
-        let item = item.upgrade();
-        if let Some(item) = item {
-            let item = item.lock();
-            match item {
-                Err(_) => (),
-                Ok(mut item) => {
-                    item.set_deadline(deadline);
-                }
+    pub fn set_item_deadline(&self, item: &Weak<Mutex<item::Item>>,  deadline: Option<NaiveDate>) -> Result<&Self> {
+        let item = item.upgrade().ok_or(Error::NonexistingItem)?;
+        let mut item = item.lock().unwrap();
+        item.set_deadline(deadline);
+        Ok(self)
+    }
+
+    pub fn set_item_plan(&self, item: &Weak<Mutex<item::Item>>,  plan: Option<NaiveDate>) -> Result<&Self> {
+        let item = item.upgrade().ok_or(Error::NonexistingItem)?;
+        let mut item = item.lock().unwrap();
+        item.set_plan(plan);
+        Ok(self)
+    }
+
+    pub fn set_item_repeat(&self, item: &Weak<Mutex<item::Item>>,  repeat: Option<item::RepeatSpan>) -> Result<&Self> {
+        let item = item.upgrade().ok_or(Error::NonexistingItem)?;
+        let mut item = item.lock().unwrap();
+        item.set_repeat(repeat);
+        Ok(self)
+    }
+
+    pub fn set_item_list(&self, item: &Weak<Mutex<item::Item>>,  list: Weak<Mutex<list::List>>) -> Result<&Self> {
+        let item_rc = item.upgrade().ok_or(Error::NonexistingItem)?;
+        
+        let mut list_old = None;
+        let item = item_rc.lock();
+        match item {
+            Err(_) => (),
+            Ok(mut item) => {
+                list_old = item.list();
+                item.set_list(Some(list));
             }
         }
-        self
-    }
-
-    pub fn set_item_plan(&self, item: &Weak<Mutex<item::Item>>,  plan: Option<NaiveDate>) -> &Self {
-        let item = item.upgrade();
-        if let Some(item) = item {
-            let item = item.lock();
-            match item {
-                Err(_) => (),
-                Ok(mut item) => {
-                    item.set_plan(plan);
-                }
-            }
+        match list_old {
+            None => (),
+            Some(list_old) => { list_old.upgrade().unwrap().lock().unwrap().remove_item(&item_rc); }
         }
-        self
-    }
-
-    pub fn set_item_repeat(&self, item: &Weak<Mutex<item::Item>>,  repeat: Option<item::RepeatSpan>) -> &Self {
-        let item = item.upgrade();
-        if let Some(item) = item {
-            let item = item.lock();
-            match item {
-                Err(_) => (),
-                Ok(mut item) => {
-                    item.set_repeat(repeat);
-                }
-            }
-        }
-        self
-    }
-
-    pub fn set_item_list(&self, item: &Weak<Mutex<item::Item>>,  list: Weak<Mutex<list::List>>) -> &Self {
-        let item = item.upgrade();
-        if let Some(item_rc) = item {
-            let mut list_old = None;
-            let item = item_rc.lock();
-            match item {
-                Err(_) => (),
-                Ok(mut item) => {
-                    list_old = item.list();
-                    item.set_list(Some(list));
-                }
-            }
-            match list_old {
-                None => (),
-                Some(list_old) => { list_old.upgrade().unwrap().lock().unwrap().remove_item(&item_rc); }
-            }
             
-        }
-        self
+        
+        Ok(self)
     }
 
-    pub fn set_item_finished(&self, item: &Weak<Mutex<item::Item>>,  finished: bool) -> &Self {
-        let item = item.upgrade();
-        if let Some(item) = item {
-            let item = item.lock();
-            match item {
-                Err(_) => (),
-                Ok(mut item) => {
-                    item.set_finished(finished);
-                }
-            }
-        }
-        self
+    pub fn set_item_finished(&self, item: &Weak<Mutex<item::Item>>,  finished: bool) -> Result<&Self> {
+        let item = item.upgrade().ok_or(Error::NonexistingItem)?;
+        let mut item = item.lock().unwrap();
+        item.set_finished(finished);
+        Ok(self)
     }
 
-    pub fn set_item_note(&self, item: &Weak<Mutex<item::Item>>, note: &str) -> &Self {
-        let item = item.upgrade();
-        if let Some(item) = item {
-            let item = item.lock();
-            match item {
-                Err(_) => (),
-                Ok(mut item) => {
-                    item.set_note(note.to_string());
-                }
-            }
-        }
-        self
+    pub fn set_item_note(&self, item: &Weak<Mutex<item::Item>>, note: &str) -> Result<&Self> {
+        let item = item.upgrade().ok_or(Error::NonexistingItem)?;
+        let mut item = item.lock().unwrap();
+        item.set_note(note.to_string());
+        Ok(self)
     }
 
     pub fn iter_items(&self) -> ItemIntoIter {
@@ -405,28 +344,25 @@ impl TodoLst {
         self.lists.remove(title);
     }
 
-    pub fn set_list_title(&self, ori_title: &str,  title: &str) -> Result<&Self> {
-        if !self.lists.contains_key(ori_title) { return Err(Error::NonexistingList); }
+    pub fn set_list_title(&mut self, list: &Weak<Mutex<list::List>>, title: &str) -> Result<&Self> {
+        let list_rc = list.upgrade().ok_or(Error::NonexistingList)?;
         if self.lists.contains_key(title) { return Err(Error::ExistingTitle); }
-        let list = self.lists[ori_title].lock();
-        match list {
-            Err(_) => (),
-            Ok(mut list) => {
-                list.set_title(title.to_string());
-            }
-        }
+        let mut list = list_rc.lock().unwrap();
+        let ori_title = list.title().to_string();
+        list.set_title(title.to_string());
+        drop(list);
+
+        let list = list_rc.clone();
+        self.lists.insert(title.to_string(), list);
+        self.lists.remove(ori_title.as_str());
+
         Ok(self)
     }
 
-    pub fn set_list_group(&self, title: &str, group: Option<Weak<Mutex<group::Group>>>) -> Result<&Self> {
-        if !self.lists.contains_key(title) { return Err(Error::NonexistingGroup); }
-        let list = self.lists[title].lock();
-        match list {
-            Err(_) => (),
-            Ok(mut list) => {
-                list.set_group(group);
-            }
-        }
+    pub fn set_list_group(&self, list: &Weak<Mutex<list::List>>, group: Option<Weak<Mutex<group::Group>>>) -> Result<&Self> {
+        let list = list.upgrade().ok_or(Error::NonexistingList)?;
+        let mut list = list.lock().unwrap();
+        list.set_group(group);
         Ok(self)
     }
 
@@ -500,35 +436,31 @@ impl TodoLst {
             group_to_remove_really.push(title_s);
         }
         for i in list_to_remove_really {
-            self.remove_list(i.as_ref());
+            self.remove_list(i.as_str());
         }
         for title in group_to_remove_really {
             self.groups.remove(&title);
         }
     }
 
-    pub fn set_group_title(&self, ori_title: &str,  title: &str) -> Result<&Self> {
-        if !self.groups.contains_key(ori_title) { return Err(Error::NonexistingGroup); }
+    pub fn set_group_title(&mut self, group: &Weak<Mutex<group::Group>>,  title: &str) -> Result<&Self> {
+        let group_rc = group.upgrade().ok_or(Error::NonexistingGroup)?;
         if self.groups.contains_key(title) { return Err(Error::ExistingTitle); }
-        let group = self.groups[ori_title].lock();
-        match group {
-            Err(_) => (),
-            Ok(mut group) => {
-                group.set_title(title.to_string());
-            }
-        }
+        let mut group = group_rc.lock().unwrap();
+        let ori_title = group.title().to_string();
+        group.set_title(title.to_string());
+        drop(group);
+
+        let group = group_rc.clone();
+        self.groups.insert(title.to_string(), group);
+        self.groups.remove(ori_title.as_str());
         Ok(self)
     }
 
-    pub fn set_group_parent(&self, title: &str, parent: Option<Weak<Mutex<group::Group>>>) -> Result<&Self> {
-        if !self.groups.contains_key(title) { return Err(Error::NonexistingGroup); }
-        let group = self.groups[title].lock();
-        match group {
-            Err(_) => (),
-            Ok(mut group) => {
-                group.set_parent(parent);
-            }
-        }
+    pub fn set_group_parent(&self, group: &Weak<Mutex<group::Group>>, parent: Option<Weak<Mutex<group::Group>>>) -> Result<&Self> {
+        let group = group.upgrade().ok_or(Error::NonexistingGroup)?;
+        let mut group = group.lock().unwrap();
+        group.set_parent(parent);
         Ok(self)
     }
 
@@ -580,7 +512,7 @@ impl TodoLst {
                     ))
                 }).unwrap().map(|itm| {itm.unwrap()}).collect();
                 for gp in gps.iter() {
-                    mgmt.new_group(gp.0.as_ref()).unwrap_or_default();
+                    mgmt.new_group(gp.0.as_str()).unwrap_or_default();
                 }
                 for gp in gps.iter() {
                     let parent = {
@@ -588,12 +520,13 @@ impl TodoLst {
                             None => None,
                             Some(ref parent) => {
                                 if parent.len()>0 {
-                                    Some(mgmt.group(parent.as_ref()).unwrap())
+                                    Some(mgmt.group(parent.as_str()).unwrap())
                                 } else { None }
                             }
                         }
                     };
-                    mgmt.set_group_parent(gp.0.as_ref(), parent).unwrap();
+                    let group = mgmt.group(gp.0.as_str()).unwrap();
+                    mgmt.set_group_parent(&group, parent).unwrap();
                 }
 
                 let mut stmt = conn.prepare("SELECT title, [group] FROM lists").unwrap();
@@ -604,18 +537,19 @@ impl TodoLst {
                     ))
                 }).unwrap().map(|itm|{itm.unwrap()}).collect();
                 for lst in lsts {
-                    if let Ok(_) = mgmt.new_list(lst.0.as_ref()) {
+                    if let Ok(_) = mgmt.new_list(lst.0.as_str()) {
                         let group = {
                             match lst.1 {
                                 None => None,
                                 Some(ref group) => {
                                     if group.len()>0 {
-                                        Some(mgmt.group(group.as_ref()).unwrap())
+                                        Some(mgmt.group(group.as_str()).unwrap())
                                     } else { None }
                                 }
                             }
                         };
-                        mgmt.set_list_group(lst.0.as_ref(), group).unwrap();
+                        let list = mgmt.list(lst.0.as_str()).unwrap();
+                        mgmt.set_list_group(&list, group).unwrap();
                     }
                 }
 
@@ -650,17 +584,17 @@ impl TodoLst {
                     })
                 }).unwrap().map(|itm| {itm.unwrap()}).collect();
                 for itm in itms {
-                    let list = mgmt.list(itm.list.as_ref()).unwrap();
-                    let item = mgmt.new_item(itm.message.as_ref(), list);
-                    mgmt.set_item_level(&item, itm.level);
-                    mgmt.set_item_style(&item, itm.style);
-                    mgmt.set_item_today(&item, itm.today);
-                    mgmt.set_item_notice(&item, itm.notice);
-                    mgmt.set_item_deadline(&item, itm.deadline);
-                    mgmt.set_item_plan(&item, itm.plan);
-                    mgmt.set_item_repeat(&item, itm.repeat);
-                    mgmt.set_item_finished(&item, itm.finished);
-                    mgmt.set_item_note(&item, itm.note.as_ref());
+                    let list = mgmt.list(itm.list.as_str()).unwrap();
+                    let item = mgmt.new_item(itm.message.as_str(), list);
+                    mgmt.set_item_level(&item, itm.level).unwrap();
+                    mgmt.set_item_style(&item, itm.style).unwrap();
+                    mgmt.set_item_today(&item, itm.today).unwrap();
+                    mgmt.set_item_notice(&item, itm.notice).unwrap();
+                    mgmt.set_item_deadline(&item, itm.deadline).unwrap();
+                    mgmt.set_item_plan(&item, itm.plan).unwrap();
+                    mgmt.set_item_repeat(&item, itm.repeat).unwrap();
+                    mgmt.set_item_finished(&item, itm.finished).unwrap();
+                    mgmt.set_item_note(&item, itm.note.as_str()).unwrap();
                 }
             }
         }
