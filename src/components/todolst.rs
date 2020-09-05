@@ -50,6 +50,7 @@ pub struct TodoLst {
     noticer: noticer::Noticer,
     notice_items: Arc<Mutex<BTreeMap<NaiveDateTime, Mutex<Vec<Arc<Mutex<item::Item>>>>>>>,
     notice_comed: Arc<Mutex<Vec<NaiveDateTime>>>,
+    callees: Arc<Mutex<Vec<Box<dyn Fn(Weak<Mutex<item::Item>>) + Send>>>>,
 }
 
 impl TodoLst {
@@ -64,11 +65,13 @@ impl TodoLst {
             noticer: noticer::Noticer::new(),
             notice_items: Arc::new(Mutex::new(BTreeMap::new())),
             notice_comed: Arc::new(Mutex::new(Vec::new())),
+            callees: Arc::new(Mutex::new(Vec::new())),
         };
         // let notice_commed = val.notice_comed.clone();
         let notice_items = val.notice_items.clone();
+        let callees = val.callees.clone();
         val.noticer.add_callback(move | datetime | {
-            println!("{}", datetime);
+            // println!("{}", datetime);
             // let notice_commed = notice_commed.lock();
             // match notice_commed {
             //     Err(_) => (),
@@ -77,9 +80,15 @@ impl TodoLst {
             //     }
             // }
             let notice_items = notice_items.lock().unwrap();
-            for item in notice_items[&datetime].lock().unwrap().iter() {
-                let item = item.lock().unwrap();
-                println!("item: id {}, message {}.", item.id(), item.message())
+            for item_rc in notice_items[&datetime].lock().unwrap().iter() {
+
+                // let item = item_rc.lock().unwrap();
+                // println!("item: id {}, message {}.", item.id(), item.message());
+                
+                let callees = callees.lock().unwrap();
+                for callee in callees.iter() {
+                    callee(Arc::downgrade(item_rc));
+                }
             }
         });
         val.noticer.start();
@@ -774,6 +783,16 @@ impl TodoLst {
             return Ok(())
         }
         Err(Error::OtherError)
+    }
+
+    pub fn add_callback<T: Fn(Weak<Mutex<item::Item>>) + Send + 'static>(&self, callback: T) {
+        let callees = self.callees.lock();
+        match callees {
+            Err(_) => (),
+            Ok(mut callees) => {
+                callees.push(Box::new(callback));
+            }
+        }
     }
 }
 
